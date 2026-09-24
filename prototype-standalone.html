@@ -1,0 +1,715 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Pipe Flow Lab — Bernoulli & Continuity Simulation</title>
+<style>
+  :root {
+    --bg: #15171a; --panel: rgba(28, 30, 34, 0.92); --line: #33373d;
+    --text: #d7d9dc; --muted: #8b9097; --accent: #c9a45c; --warn: #d0794f;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--text);
+    font: 13px/1.4 "Segoe UI", system-ui, sans-serif; }
+  #scene { position: fixed; inset: 0; }
+  .panel { position: fixed; background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+    padding: 14px 16px; backdrop-filter: blur(6px); }
+  .panel h2 { margin: 0 0 10px; font-size: 11px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+  #controls { top: 14px; left: 14px; width: 290px; }
+  #readout { top: 14px; right: 14px; width: 330px; }
+  #modes { bottom: 14px; left: 14px; width: 290px; }
+  #legend { bottom: 14px; right: 14px; width: 330px; display: none; }
+  .ctrl { margin-bottom: 12px; }
+  .ctrl label { display: flex; justify-content: space-between; margin-bottom: 4px; }
+  .ctrl label span { font-family: Consolas, monospace; color: var(--accent); }
+  .ctrl small { color: var(--muted); display: block; margin-top: 2px; font-size: 11px; }
+  input[type=range] { width: 100%; accent-color: #9aa3ad; }
+  .grid { display: grid; grid-template-columns: 1fr auto; gap: 3px 12px; }
+  .grid .k { color: var(--muted); }
+  .grid .v { font-family: Consolas, monospace; text-align: right; }
+  .sep { border-top: 1px solid var(--line); margin: 10px 0; }
+  table { width: 100%; border-collapse: collapse; font-family: Consolas, monospace; font-size: 11.5px; }
+  th { color: var(--muted); font-weight: 500; text-align: right; padding: 2px 4px; border-bottom: 1px solid var(--line); }
+  th:first-child, td:first-child { text-align: left; }
+  td { text-align: right; padding: 2px 4px; }
+  .btns { display: flex; gap: 6px; }
+  .btns button { flex: 1; padding: 7px 0; background: #25282d; color: var(--text); border: 1px solid var(--line);
+    border-radius: 4px; cursor: pointer; font: inherit; }
+  .btns button.active { background: #3a3f46; border-color: #6b727b; }
+  #status { margin-top: 8px; font-size: 11.5px; color: var(--warn); min-height: 1em; }
+  .bar { height: 12px; border-radius: 2px; margin: 6px 0 4px; }
+  .legend-scale { display: flex; justify-content: space-between; font-family: Consolas, monospace; font-size: 11px; color: var(--muted); }
+  .note { font-size: 11px; color: var(--warn); margin-top: 6px; }
+  .hint { font-size: 11px; color: var(--muted); margin-top: 8px; }
+  .tag { background: rgba(20, 22, 25, 0.88); border: 1px solid #454a51; border-radius: 3px; padding: 3px 7px;
+    font: 11px Consolas, monospace; color: var(--text); white-space: nowrap; pointer-events: none; }
+  .tag b { color: var(--accent); font-weight: 600; }
+  .tag.minor { color: var(--muted); font-family: "Segoe UI", sans-serif; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="scene"></div>
+
+<div id="controls" class="panel">
+  <h2>Input Parameters</h2>
+  <div class="ctrl"><label>Flow Rate (setpoint) <span id="lblQ"></span></label>
+    <input id="inQ" type="range" min="0" max="400" step="1" value="120" /></div>
+  <div class="ctrl"><label>Small Pipe Diameter <span id="lblD"></span></label>
+    <input id="inD" type="range" min="15" max="50" step="1" value="25" />
+    <small>Main pipe = 50 mm, Large pipe = 80 mm (fixed)</small></div>
+  <div class="ctrl"><label>Valve Opening <span id="lblO"></span></label>
+    <input id="inO" type="range" min="0" max="100" step="1" value="70" /></div>
+  <div class="ctrl"><label>Inlet Pressure (gauge) <span id="lblP"></span></label>
+    <input id="inP" type="range" min="0" max="500" step="5" value="200" /></div>
+  <div id="status"></div>
+</div>
+
+<div id="readout" class="panel">
+  <h2>Measured Values</h2>
+  <div class="grid">
+    <div class="k">Flow Rate (actual)</div><div class="v" id="oQ"></div>
+    <div class="k">Velocity — main pipe (V1)</div><div class="v" id="oV1"></div>
+    <div class="k">Velocity — small pipe (V3)</div><div class="v" id="oV3"></div>
+    <div class="k">Velocity — large pipe (V4)</div><div class="v" id="oV4"></div>
+    <div class="k">Pressure P1 — before valve</div><div class="v" id="oP1"></div>
+    <div class="k">Pressure P2 — after valve</div><div class="v" id="oP2"></div>
+    <div class="k">Pressure P3 — small pipe</div><div class="v" id="oP3"></div>
+    <div class="k">Valve Opening</div><div class="v" id="oO"></div>
+    <div class="k">Valve K / head loss hL</div><div class="v" id="oK"></div>
+    <div class="k">Pressure Drop (P1 − P2)</div><div class="v" id="oDP"></div>
+  </div>
+  <div class="sep"></div>
+  <h2>Energy Balance  (H = P/ρg + V²/2g + z)</h2>
+  <table>
+    <thead><tr><th>Point</th><th>P/ρg [m]</th><th>V²/2g [m]</th><th>z [m]</th><th>H [m]</th></tr></thead>
+    <tbody id="energy"></tbody>
+  </table>
+  <div class="hint">H ลดลงเฉพาะที่วาล์ว (hL) — ส่วนอื่นคงที่ตาม Bernoulli (ไม่คิด friction ท่อ)</div>
+</div>
+
+<div id="modes" class="panel">
+  <h2>Display Mode</h2>
+  <div class="btns">
+    <button data-mode="water" class="active">Water</button>
+    <button data-mode="pressure">Pressure</button>
+    <button data-mode="velocity">Velocity</button>
+  </div>
+  <div class="hint">Left-drag: rotate · Right-drag: pan · Wheel: zoom</div>
+</div>
+
+<div id="legend" class="panel">
+  <h2 id="legendTitle"></h2>
+  <div class="bar" id="legendBar"></div>
+  <div class="legend-scale"><span id="legendMin"></span><span id="legendMax"></span></div>
+  <div class="note">⚠ สีเป็น Visualization เพื่อแสดงค่าเท่านั้น — ไม่ใช่สีจริงของน้ำ</div>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+
+/* =====================================================================
+ * 1) CALCULATION LOGIC — pure functions, no Three.js dependency
+ * ===================================================================== */
+const Hydraulics = (() => {
+  const RHO = 998.2;          // kg/m³ water @ 20 °C
+  const G = 9.81;             // m/s²
+  const P_ATM = 101325;       // Pa
+  const P_VAPOR = 2339;       // Pa, water @ 20 °C
+  const K_FULL_OPEN = 0.25;   // valve loss coefficient when 100 % open
+  const D_MAIN = 50;          // mm
+  const D_LARGE = 80;         // mm
+  const Z = 1.2;              // m, pipe centreline elevation above datum (horizontal system)
+
+  const area = dmm => Math.PI * (dmm / 1000) ** 2 / 4;
+
+  // Simple characteristic: K grows with the inverse square of the opening fraction.
+  const valveK = opening => opening <= 0 ? Infinity : K_FULL_OPEN / (opening * opening);
+
+  /**
+   * @param {{flowRate:number, smallDiameter:number, valveOpening:number, inletPressure:number}} p
+   *   flowRate [L/min], smallDiameter [mm], valveOpening [%], inletPressure [kPa gauge]
+   */
+  function compute(p) {
+    const A1 = area(D_MAIN), A3 = area(p.smallDiameter), A4 = area(D_LARGE);
+    const o = p.valveOpening / 100;
+    const K = valveK(o);
+    const P0 = p.inletPressure * 1000;
+    const Qset = p.flowRate / 60000;
+
+    // Max flow the inlet pressure can push with outlet open to atmosphere (P4 = 0):
+    // P0 = ½ρ [ V4² − V1² + K·V1² ]  →  P0 = ½ρ Q² [ 1/A4² + (K−1)/A1² ]
+    let Qmax;
+    if (o <= 0) Qmax = 0;
+    else {
+      const c = 1 / (A4 * A4) + (K - 1) / (A1 * A1);
+      Qmax = c > 0 ? Math.sqrt(P0 / (0.5 * RHO * c)) : Infinity;
+    }
+    const Q = Math.min(Qset, Qmax);
+    const limited = Qset > Qmax + 1e-9;
+
+    const V1 = Q / A1, V3 = Q / A3, V4 = Q / A4;
+    const hL = Number.isFinite(K) ? K * V1 * V1 / (2 * G) : 0;
+
+    const P1 = P0;
+    let P2, P3, P4;
+    if (o <= 0) { P2 = P3 = P4 = 0; }                      // closed valve, downstream vented to outlet
+    else {
+      P2 = P1 - RHO * G * hL;                               // valve loss
+      P3 = P2 + 0.5 * RHO * (V1 * V1 - V3 * V3);            // Bernoulli, same z
+      P4 = P2 + 0.5 * RHO * (V1 * V1 - V4 * V4);
+    }
+
+    const head = (P, V) => ({ pHead: P / (RHO * G), vHead: V * V / (2 * G), z: Z, H: P / (RHO * G) + V * V / (2 * G) + Z });
+    const pMin = Math.min(P1, P2, P3, P4);
+
+    return {
+      Q, Qset, Qmax, limited, K, hL, opening: o,
+      D1: D_MAIN, D3: p.smallDiameter, D4: D_LARGE,
+      V1, V3, V4, P1, P2, P3, P4,
+      dP: P1 - P2,
+      cavitation: pMin + P_ATM < P_VAPOR,
+      energy: { P1: head(P1, V1), P2: head(P2, V1), P3: head(P3, V3), P4: head(P4, V4) },
+    };
+  }
+
+  return { compute, area, RHO, G, D_MAIN, D_LARGE };
+})();
+
+/* Geometry layout (scene units = metres along the pipe axis; radii are visually exaggerated) */
+const Layout = {
+  pipeY: 1.4,
+  xStart: -5.0, xEnd: 7.6,
+  valveStart: -1.95, valveEnd: -1.05, valveX: -1.5,
+  reducerA: 0.3, reducerB: 0.9,       // main → small
+  expanderA: 3.4, expanderB: 4.2,     // small → large
+  gauges: { P1: -3.1, P2: -0.45, P3: 2.15 },
+  radiusScale: 0.004,                 // scene radius per mm of diameter
+  diameterAt(x, r) {                  // r = result from Hydraulics.compute
+    const lerp = (a, b, t) => a + (b - a) * Math.min(1, Math.max(0, t));
+    if (x < this.reducerA) return r.D1;
+    if (x < this.reducerB) return lerp(r.D1, r.D3, (x - this.reducerA) / (this.reducerB - this.reducerA));
+    if (x < this.expanderA) return r.D3;
+    if (x < this.expanderB) return lerp(r.D3, r.D4, (x - this.expanderA) / (this.expanderB - this.expanderA));
+    return r.D4;
+  },
+  radiusAt(x, r) { return this.diameterAt(x, r) * this.radiusScale; },
+  velocityAt(x, r) { return r.Q / Hydraulics.area(this.diameterAt(x, r)); },
+  pressureAt(x, r) {
+    if (x < this.valveStart) return r.P1;
+    if (x < this.valveEnd) return r.P1 + (r.P2 - r.P1) * (x - this.valveStart) / (this.valveEnd - this.valveStart);
+    if (r.opening <= 0) return 0;
+    const v = this.velocityAt(x, r);
+    return r.P2 + 0.5 * Hydraulics.RHO * (r.V1 * r.V1 - v * v);
+  },
+};
+
+/* =====================================================================
+ * 2) RENDERING — Three.js
+ * ===================================================================== */
+const container = document.getElementById('scene');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 0.95;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+container.appendChild(renderer.domElement);
+
+const labelRenderer = new CSS2DRenderer();
+labelRenderer.setSize(innerWidth, innerHeight);
+Object.assign(labelRenderer.domElement.style, { position: 'fixed', inset: '0', pointerEvents: 'none' });
+container.appendChild(labelRenderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1d1f22);
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(renderer), 0.04).texture;
+
+const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.05, 200);
+camera.position.set(1.5, 4.2, 12.5);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(1.2, 1.2, 0);
+controls.enableDamping = true;
+controls.maxPolarAngle = Math.PI * 0.49;
+controls.minDistance = 2; controls.maxDistance = 35;
+
+// Lighting — soft key light + low fill
+scene.add(new THREE.HemisphereLight(0xdfe4ea, 0x2a2b2d, 0.35));
+const key = new THREE.DirectionalLight(0xfff4e6, 1.6);
+key.position.set(-6, 12, 8);
+key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048);
+key.shadow.radius = 6;
+key.shadow.bias = -0.0004;
+Object.assign(key.shadow.camera, { left: -12, right: 14, top: 8, bottom: -8, near: 1, far: 40 });
+scene.add(key);
+
+/* ---------- Materials (PBR) ---------- */
+const M = {
+  steel: new THREE.MeshStandardMaterial({ color: 0xc3c7cb, metalness: 1, roughness: 0.26 }),
+  brushed: new THREE.MeshStandardMaterial({ color: 0x9da2a8, metalness: 1, roughness: 0.42 }),
+  painted: new THREE.MeshStandardMaterial({ color: 0x44505c, metalness: 0.35, roughness: 0.55 }),
+  valveBody: new THREE.MeshStandardMaterial({ color: 0x3b4652, metalness: 0.5, roughness: 0.45 }),
+  handwheel: new THREE.MeshStandardMaterial({ color: 0x7d2b27, metalness: 0.3, roughness: 0.5 }),
+  floor: new THREE.MeshStandardMaterial({ color: 0x3a3c3f, metalness: 0, roughness: 0.85 }),
+  wall: new THREE.MeshStandardMaterial({ color: 0x2c2e31, metalness: 0, roughness: 0.95 }),
+  glass: new THREE.MeshPhysicalMaterial({ color: 0xffffff, metalness: 0, roughness: 0.03, transparent: true,
+    opacity: 0.16, clearcoat: 1, clearcoatRoughness: 0.03, side: THREE.DoubleSide, depthWrite: false, envMapIntensity: 1.4 }),
+  water: new THREE.MeshPhysicalMaterial({ color: 0xffffff, metalness: 0, roughness: 0.04, transmission: 1,
+    ior: 1.333, thickness: 0.35, attenuationColor: new THREE.Color(0xa9d4d6), attenuationDistance: 1.8,
+    specularIntensity: 1, envMapIntensity: 1 }),
+  waterViz: new THREE.MeshStandardMaterial({ vertexColors: true, metalness: 0, roughness: 0.35, transparent: true, opacity: 0.72 }),
+  tracer: new THREE.MeshStandardMaterial({ color: 0xefeae0, roughness: 0.55 }),
+  gaugeFace: null,
+};
+
+/* ---------- Static lab environment ---------- */
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(60, 40), M.floor);
+floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
+const wall = new THREE.Mesh(new THREE.PlaneGeometry(60, 14), M.wall);
+wall.position.set(0, 7, -5); wall.receiveShadow = true; scene.add(wall);
+// floor drainage lines for scale reference
+for (let i = -6; i <= 12; i += 3) {
+  const l = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.002, 20), new THREE.MeshStandardMaterial({ color: 0x323437, roughness: 1 }));
+  l.position.set(i, 0.001, 3); scene.add(l);
+}
+
+/* ---------- Tank ---------- */
+const tank = new THREE.Group();
+{
+  const R = 1.1, H = 2.6, baseY = 0.55;
+  const shell = new THREE.Mesh(new THREE.CylinderGeometry(R, R, H, 64, 1, true), M.brushed);
+  shell.position.y = baseY + H / 2; shell.castShadow = shell.receiveShadow = true;
+  const top = new THREE.Mesh(new THREE.CylinderGeometry(R * 1.02, R * 1.02, 0.06, 64), M.steel);
+  top.position.y = baseY + H;
+  const bottom = new THREE.Mesh(new THREE.SphereGeometry(R, 48, 16, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), M.brushed);
+  bottom.scale.y = 0.25; bottom.position.y = baseY; bottom.castShadow = true;
+  tank.add(shell, top, bottom);
+  // stiffener rings
+  for (const y of [0.9, 1.9, 2.8]) {
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(R + 0.015, 0.025, 12, 64), M.steel);
+    ring.rotation.x = Math.PI / 2; ring.position.y = y; tank.add(ring);
+  }
+  // legs
+  for (let i = 0; i < 4; i++) {
+    const a = i * Math.PI / 2 + Math.PI / 4;
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, baseY + 0.3, 16), M.steel);
+    leg.position.set(Math.cos(a) * R * 0.85, (baseY + 0.3) / 2, Math.sin(a) * R * 0.85); leg.castShadow = true;
+    tank.add(leg);
+  }
+  // sight glass with water level
+  const sgX = Math.cos(Math.PI / 4) * (R + 0.12), sgZ = Math.sin(Math.PI / 4) * (R + 0.12);
+  const sgGlass = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 2.1, 24), M.glass);
+  sgGlass.position.set(sgX, baseY + 1.3, sgZ);
+  const sgWater = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 1.55, 24), M.water);
+  sgWater.position.set(sgX, baseY + 0.25 + 1.55 / 2, sgZ);
+  for (const y of [baseY + 0.25, baseY + 2.35]) {
+    const nip = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.14, 12), M.steel);
+    nip.rotation.z = Math.PI / 2; nip.rotation.y = -Math.PI / 4;
+    nip.position.set(Math.cos(Math.PI / 4) * (R + 0.06), y, Math.sin(Math.PI / 4) * (R + 0.06));
+    tank.add(nip);
+  }
+  tank.add(sgGlass, sgWater);
+  tank.position.set(-6.1, 0, 0);
+  scene.add(tank);
+  const tl = new CSS2DObject(Object.assign(document.createElement('div'), { className: 'tag minor', textContent: 'Water Tank (pressurised supply)' }));
+  tl.position.set(0, baseY + H + 0.35, 0); tank.add(tl);
+}
+
+/* ---------- Valve (gate valve with rising stem & handwheel) ---------- */
+const valve = new THREE.Group();
+const valveMoving = new THREE.Group();   // stem + handwheel (rotates & rises)
+{
+  const r = Hydraulics.D_MAIN * Layout.radiusScale;
+  const body = new THREE.Mesh(new THREE.SphereGeometry(r + 0.14, 48, 32), M.valveBody);
+  body.scale.set(1.25, 1.1, 1); body.castShadow = true;
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.17, 0.35, 32), M.valveBody);
+  neck.position.y = r + 0.25; neck.castShadow = true;
+  const bonnet = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.19, 0.06, 32), M.valveBody);
+  bonnet.position.y = r + 0.45;
+  const yoke = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.42, 0.05), M.valveBody);
+  const yoke2 = yoke.clone();
+  yoke.position.set(0.13, r + 0.66, 0); yoke2.position.set(-0.13, r + 0.66, 0);
+  const yokeTop = new THREE.Mesh(new THREE.BoxGeometry(0.31, 0.05, 0.08), M.valveBody);
+  yokeTop.position.y = r + 0.88;
+  valve.add(body, neck, bonnet, yoke, yoke2, yokeTop);
+  for (const s of [-1, 1]) {
+    const fl = new THREE.Mesh(new THREE.CylinderGeometry(r + 0.1, r + 0.1, 0.07, 40), M.valveBody);
+    fl.rotation.z = Math.PI / 2; fl.position.x = s * 0.42; fl.castShadow = true; valve.add(fl);
+  }
+  const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.7, 16), M.steel);
+  stem.position.y = r + 0.62;
+  const wheel = new THREE.Mesh(new THREE.TorusGeometry(0.26, 0.028, 16, 64), M.handwheel);
+  wheel.rotation.x = Math.PI / 2; wheel.position.y = r + 0.98; wheel.castShadow = true;
+  const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.06, 24), M.handwheel);
+  hub.position.y = r + 0.98;
+  valveMoving.add(stem, wheel, hub);
+  for (let i = 0; i < 5; i++) {
+    const spoke = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.25, 8), M.handwheel);
+    spoke.rotation.z = Math.PI / 2; spoke.position.y = r + 0.98;
+    const pivot = new THREE.Group(); pivot.rotation.y = i * Math.PI * 2 / 5;
+    spoke.position.x = 0.13; pivot.add(spoke); valveMoving.add(pivot);
+  }
+  // knob on the rim so rotation is readable
+  const knob = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.1, 12), M.painted);
+  knob.position.set(0.26, r + 1.03, 0); valveMoving.add(knob);
+  valve.add(valveMoving);
+  valve.position.set(Layout.valveX, Layout.pipeY, 0);
+  scene.add(valve);
+}
+
+/* ---------- Gauge face texture ---------- */
+const GAUGE_MAX = 600; // kPa
+M.gaugeFace = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const g = c.getContext('2d');
+  g.fillStyle = '#ecebe6'; g.beginPath(); g.arc(128, 128, 124, 0, Math.PI * 2); g.fill();
+  g.strokeStyle = '#222'; g.fillStyle = '#222'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.font = '600 20px Segoe UI, sans-serif';
+  for (let v = 0; v <= GAUGE_MAX; v += 20) {
+    const t = (-135 + v / GAUGE_MAX * 270) * Math.PI / 180;
+    const major = v % 100 === 0;
+    const r0 = major ? 92 : 100, r1 = 110;
+    g.lineWidth = major ? 3 : 1.5;
+    g.beginPath(); g.moveTo(128 + r0 * Math.sin(t), 128 - r0 * Math.cos(t));
+    g.lineTo(128 + r1 * Math.sin(t), 128 - r1 * Math.cos(t)); g.stroke();
+    if (major) g.fillText(v, 128 + 74 * Math.sin(t), 128 - 74 * Math.cos(t));
+  }
+  g.font = '500 18px Segoe UI, sans-serif'; g.fillText('kPa', 128, 175);
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8;
+  return new THREE.MeshStandardMaterial({ map: tex, roughness: 0.4 });
+})();
+
+/* ---------- Colour map (muted, engineering style) ---------- */
+const RAMP = ['#2e4b7a', '#3d7f93', '#74a36a', '#d2ad4d', '#b9523c'].map(h => new THREE.Color(h));
+function rampColor(t, out) {
+  t = Math.min(1, Math.max(0, t)) * (RAMP.length - 1);
+  const i = Math.min(RAMP.length - 2, Math.floor(t));
+  return out.copy(RAMP[i]).lerp(RAMP[i + 1], t - i);
+}
+document.getElementById('legendBar').style.background =
+  `linear-gradient(90deg, ${RAMP.map(c => '#' + c.getHexString()).join(',')})`;
+
+/* ---------- Pipework (rebuilt when diameter changes) ---------- */
+let pipework = null;            // THREE.Group
+let waterMesh = null;           // coloured in viz modes
+let stream = null;              // outlet jet
+let gaugeNeedles = {};          // P1/P2/P3 → needle pivot
+let gaugeLabels = {};
+let builtForD3 = null;
+const WALL = 0.018;
+
+function latheAlongX(x0, x1, radiusFn, material, segs = 48) {
+  const pts = [];
+  const n = Math.max(2, Math.ceil((x1 - x0) / 0.04));
+  for (let i = 0; i <= n; i++) { const x = x0 + (x1 - x0) * i / n; pts.push(new THREE.Vector2(radiusFn(x), x)); }
+  const geo = new THREE.LatheGeometry(pts, segs);
+  const mesh = new THREE.Mesh(geo, material);
+  mesh.rotation.z = -Math.PI / 2;  // lathe Y axis → world +X
+  mesh.position.y = Layout.pipeY;
+  return mesh;
+}
+
+function flange(x, r) {
+  const g = new THREE.Group();
+  const disc = new THREE.Mesh(new THREE.CylinderGeometry(r + 0.075, r + 0.075, 0.05, 40), M.steel);
+  disc.rotation.z = Math.PI / 2; disc.castShadow = true; g.add(disc);
+  for (let i = 0; i < 6; i++) {
+    const a = i / 6 * Math.PI * 2;
+    const bolt = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.09, 8), M.brushed);
+    bolt.rotation.z = Math.PI / 2; bolt.position.set(0, Math.cos(a) * (r + 0.045), Math.sin(a) * (r + 0.045));
+    g.add(bolt);
+  }
+  g.position.set(x, Layout.pipeY, 0);
+  return g;
+}
+
+function support(x, r) {
+  const g = new THREE.Group();
+  const h = Layout.pipeY - r - 0.02;
+  const post = new THREE.Mesh(new THREE.BoxGeometry(0.08, h, 0.08), M.painted);
+  post.position.y = h / 2; post.castShadow = true;
+  const base = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.03, 0.3), M.painted); base.position.y = 0.015;
+  const saddle = new THREE.Mesh(new THREE.TorusGeometry(r + 0.012, 0.012, 8, 32, Math.PI), M.steel);
+  saddle.rotation.y = Math.PI / 2; saddle.rotation.z = Math.PI; saddle.position.y = Layout.pipeY;
+  g.add(post, base, saddle);
+  g.position.x = x;
+  return g;
+}
+
+function gauge(name, x, r) {
+  const g = new THREE.Group();
+  const stemH = 0.45;
+  const tap = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, stemH, 12), M.steel);
+  tap.position.y = r + stemH / 2;
+  const boss = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.05, 16), M.steel);
+  boss.position.y = r;
+  const caseY = r + stemH + 0.13;
+  const casing = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.06, 40), M.steel);
+  casing.rotation.x = Math.PI / 2; casing.position.y = caseY; casing.castShadow = true;
+  const face = new THREE.Mesh(new THREE.CircleGeometry(0.125, 40), M.gaugeFace);
+  face.position.set(0, caseY, 0.031);
+  const lens = new THREE.Mesh(new THREE.CircleGeometry(0.13, 40), M.glass);
+  lens.position.set(0, caseY, 0.036);
+  const needlePivot = new THREE.Group(); needlePivot.position.set(0, caseY, 0.034);
+  const needle = new THREE.Mesh(new THREE.BoxGeometry(0.008, 0.1, 0.003), new THREE.MeshStandardMaterial({ color: 0x9b1f1a, roughness: 0.4 }));
+  needle.position.y = 0.04; needlePivot.add(needle);
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.006, 12), M.painted);
+  cap.rotation.x = Math.PI / 2; needlePivot.add(cap);
+  g.add(tap, boss, casing, face, lens, needlePivot);
+  const div = document.createElement('div'); div.className = 'tag';
+  const label = new CSS2DObject(div); label.position.set(0, caseY + 0.27, 0); g.add(label);
+  g.position.set(x, Layout.pipeY, 0);
+  gaugeNeedles[name] = needlePivot; gaugeLabels[name] = div;
+  return g;
+}
+
+function buildPipework(r) {
+  if (pipework) {
+    scene.remove(pipework);
+    pipework.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.element) o.element.remove(); });
+  }
+  pipework = new THREE.Group();
+  gaugeNeedles = {}; gaugeLabels = {};
+  const rad = x => Layout.radiusAt(x, r);
+
+  // Water core (continuous, from tank nozzle to outlet)
+  waterMesh = latheAlongX(Layout.xStart, Layout.xEnd, x => rad(x) - 0.004, currentMode === 'water' ? M.water : M.waterViz, 64);
+  waterMesh.geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(waterMesh.geometry.attributes.position.count * 3), 3));
+  pipework.add(waterMesh);
+
+  // Transparent acrylic pipe sections (valve body excluded)
+  pipework.add(latheAlongX(-4.6, Layout.valveStart - 0.1, x => rad(x) + WALL, M.glass));
+  pipework.add(latheAlongX(Layout.valveEnd + 0.1, Layout.xEnd - 0.2, x => rad(x) + WALL, M.glass));
+
+  // Metal: tank nozzle and outlet nozzle
+  const nozzle = latheAlongX(Layout.xStart, -4.6, x => rad(x) + WALL + 0.004, M.steel);
+  const outlet = latheAlongX(Layout.xEnd - 0.2, Layout.xEnd, x => rad(x) + WALL + 0.004, M.steel);
+  nozzle.castShadow = outlet.castShadow = true;
+  pipework.add(nozzle, outlet);
+
+  for (const x of [-4.6, Layout.valveStart - 0.1, Layout.valveEnd + 0.1, Layout.reducerA, Layout.reducerB,
+    Layout.expanderA, Layout.expanderB, Layout.xEnd - 0.2]) {
+    pipework.add(flange(x, rad(x) + WALL));
+  }
+  for (const x of [-3.9, 1.9, 5.9]) pipework.add(support(x, rad(x) + WALL));
+  for (const [name, x] of Object.entries(Layout.gauges)) pipework.add(gauge(name, x, rad(x) + WALL));
+
+  // Section labels
+  const tagAt = (text, x, y) => {
+    const o = new CSS2DObject(Object.assign(document.createElement('div'), { className: 'tag minor', textContent: text }));
+    o.position.set(x, y, 0); pipework.add(o);
+  };
+  tagAt(`Main pipe Ø${r.D1} mm`, -4.2, Layout.pipeY - 0.45);
+  tagAt('Gate valve', Layout.valveX, Layout.pipeY - 0.5);
+  tagAt(`Small pipe Ø${r.D3} mm`, 2.9, Layout.pipeY - 0.4);
+  tagAt(`Large pipe Ø${r.D4} mm`, 5.9, Layout.pipeY - 0.62);
+  tagAt('Outlet', Layout.xEnd + 0.2, Layout.pipeY + 0.5);
+
+  // Collection basin under the outlet
+  const basin = new THREE.Group();
+  const bw = 2.6, bd = 1.6, bh = 0.35;
+  const bMat = M.brushed;
+  const bottomP = new THREE.Mesh(new THREE.BoxGeometry(bw, 0.03, bd), bMat); bottomP.position.y = 0.015;
+  basin.add(bottomP);
+  for (const [w, d, x, z] of [[bw, 0.03, 0, bd / 2], [bw, 0.03, 0, -bd / 2], [0.03, bd, bw / 2, 0], [0.03, bd, -bw / 2, 0]]) {
+    const side = new THREE.Mesh(new THREE.BoxGeometry(w, bh, d), bMat);
+    side.position.set(x, bh / 2, z); side.castShadow = true; basin.add(side);
+  }
+  const pool = new THREE.Mesh(new THREE.BoxGeometry(bw - 0.04, 0.2, bd - 0.04), M.water);
+  pool.position.y = 0.13; basin.add(pool);
+  basin.position.set(Layout.xEnd + 1.3, 0, 0);
+  pipework.add(basin);
+
+  scene.add(pipework);
+  builtForD3 = r.D3;
+  stream = null;
+}
+
+/* ---------- Outlet jet (projectile path from exit velocity) ---------- */
+function updateStream(r) {
+  if (stream) { pipework.remove(stream); stream.geometry.dispose(); stream = null; }
+  if (r.Q <= 1e-7) return;
+  const rOut = Layout.radiusAt(Layout.xEnd, r);
+  const jetR = Math.max(0.02, rOut * 0.85);
+  const pts = [];
+  const tEnd = Math.sqrt(2 * (Layout.pipeY - 0.2) / Hydraulics.G);
+  for (let i = 0; i <= 24; i++) {
+    const t = tEnd * i / 24;
+    pts.push(new THREE.Vector3(Layout.xEnd + r.V4 * t, Layout.pipeY - 0.5 * Hydraulics.G * t * t, 0));
+  }
+  const geo = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 48, jetR, 32, false);
+  stream = new THREE.Mesh(geo, M.water);
+  pipework.add(stream);
+}
+
+/* ---------- Flow tracers ---------- */
+const TRACER_COUNT = 420;
+const tracerMesh = new THREE.InstancedMesh(new THREE.SphereGeometry(0.016, 10, 8), M.tracer, TRACER_COUNT);
+scene.add(tracerMesh);
+const tracers = Array.from({ length: TRACER_COUNT }, () => ({
+  x: Layout.xStart + Math.random() * (Layout.xEnd - Layout.xStart),
+  a: Math.random() * Math.PI * 2,
+  f: Math.sqrt(Math.random()) * 0.82,
+}));
+const dummy = new THREE.Object3D();
+const MAX_VIS_SPEED = 9; // m/s clamp so particles stay readable at extreme settings
+
+function updateTracers(dt, r) {
+  const span = Layout.xEnd - Layout.xStart;
+  for (let i = 0; i < TRACER_COUNT; i++) {
+    const p = tracers[i];
+    const v = Math.min(MAX_VIS_SPEED, Layout.velocityAt(p.x, r));
+    p.x += v * dt;
+    if (p.x > Layout.xEnd) { p.x -= span; p.a = Math.random() * Math.PI * 2; }
+    const rr = (Layout.radiusAt(p.x, r) - 0.02) * p.f;
+    dummy.position.set(p.x, Layout.pipeY + Math.sin(p.a) * rr, Math.cos(p.a) * rr);
+    dummy.updateMatrix();
+    tracerMesh.setMatrixAt(i, dummy.matrix);
+  }
+  tracerMesh.instanceMatrix.needsUpdate = true;
+}
+
+/* ---------- Visualisation modes ---------- */
+let currentMode = 'water';
+const tmpColor = new THREE.Color();
+
+function applyMode(r) {
+  const legend = document.getElementById('legend');
+  if (currentMode === 'water') {
+    waterMesh.material = M.water; legend.style.display = 'none'; return;
+  }
+  const field = currentMode === 'pressure' ? x => Layout.pressureAt(x, r) / 1000 : x => Layout.velocityAt(x, r);
+  const pos = waterMesh.geometry.attributes.position;
+  const col = waterMesh.geometry.attributes.color;
+  let lo = Infinity, hi = -Infinity;
+  const vals = new Float32Array(pos.count);
+  for (let i = 0; i < pos.count; i++) { vals[i] = field(pos.getY(i)); lo = Math.min(lo, vals[i]); hi = Math.max(hi, vals[i]); }
+  const range = hi - lo > 1e-6 ? hi - lo : 1;
+  for (let i = 0; i < pos.count; i++) {
+    rampColor((vals[i] - lo) / range, tmpColor);
+    col.setXYZ(i, tmpColor.r, tmpColor.g, tmpColor.b);
+  }
+  col.needsUpdate = true;
+  waterMesh.material = M.waterViz;
+  legend.style.display = 'block';
+  const unit = currentMode === 'pressure' ? 'kPa' : 'm/s';
+  const dec = currentMode === 'pressure' ? 1 : 2;
+  document.getElementById('legendTitle').textContent =
+    currentMode === 'pressure' ? 'Pressure (gauge) — Visualization' : 'Velocity — Visualization';
+  document.getElementById('legendMin').textContent = `${lo.toFixed(dec)} ${unit}`;
+  document.getElementById('legendMax').textContent = `${hi.toFixed(dec)} ${unit}`;
+}
+
+/* =====================================================================
+ * 3) UI BINDING
+ * ===================================================================== */
+const $ = id => document.getElementById(id);
+const inputs = { flowRate: $('inQ'), smallDiameter: $('inD'), valveOpening: $('inO'), inletPressure: $('inP') };
+let result = null;
+let valveTargetOpening = 0, valveShownOpening = 0;
+
+const f = (v, d = 1) => Number.isFinite(v) ? v.toFixed(d) : '—';
+
+function recompute() {
+  const params = Object.fromEntries(Object.entries(inputs).map(([k, el]) => [k, parseFloat(el.value)]));
+  result = Hydraulics.compute(params);
+  const r = result;
+
+  $('lblQ').textContent = `${params.flowRate} L/min`;
+  $('lblD').textContent = `${params.smallDiameter} mm`;
+  $('lblO').textContent = `${params.valveOpening} %`;
+  $('lblP').textContent = `${params.inletPressure} kPa`;
+
+  $('oQ').textContent = `${f(r.Q * 60000)} L/min`;
+  $('oV1').textContent = `${f(r.V1, 2)} m/s`;
+  $('oV3').textContent = `${f(r.V3, 2)} m/s`;
+  $('oV4').textContent = `${f(r.V4, 2)} m/s`;
+  $('oP1').textContent = `${f(r.P1 / 1000)} kPa`;
+  $('oP2').textContent = `${f(r.P2 / 1000)} kPa`;
+  $('oP3').textContent = `${f(r.P3 / 1000)} kPa`;
+  $('oO').textContent = `${params.valveOpening} %`;
+  $('oK').textContent = Number.isFinite(r.K) ? `${f(r.K, 2)} / ${f(r.hL, 2)} m` : 'closed';
+  $('oDP').textContent = `${f(r.dP / 1000)} kPa`;
+
+  const rows = [['P1', 'P1'], ['P2', 'P2'], ['P3', 'P3'], ['Outlet', 'P4']];
+  $('energy').innerHTML = rows.map(([n, k]) => {
+    const e = r.energy[k];
+    return `<tr><td>${n}</td><td>${f(e.pHead, 2)}</td><td>${f(e.vHead, 3)}</td><td>${f(e.z, 2)}</td><td>${f(e.H, 2)}</td></tr>`;
+  }).join('');
+
+  const msgs = [];
+  if (r.opening <= 0) msgs.push('Valve closed — no flow.');
+  else if (r.limited) msgs.push(`Flow limited to ${f(r.Qmax * 60000)} L/min by inlet pressure + valve loss.`);
+  else if (r.Q > 0 && r.P4 > 500) msgs.push(`Residual outlet pressure ${f(r.P4 / 1000)} kPa (assumed throttled at outlet).`);
+  if (r.cavitation) msgs.push('P3 below vapour pressure — cavitation risk (model not valid).');
+  $('status').textContent = msgs.join(' ');
+
+  if (builtForD3 !== r.D3) buildPipework(r);
+  updateStream(r);
+  applyMode(r);
+
+  for (const [name, key] of [['P1', 'P1'], ['P2', 'P2'], ['P3', 'P3']]) {
+    const kPa = r[key] / 1000;
+    gaugeNeedles[name].userData.target = Math.min(1, Math.max(0, kPa / GAUGE_MAX));
+    gaugeLabels[name].innerHTML = `${name} <b>${f(kPa)}</b> kPa`;
+  }
+  valveTargetOpening = r.opening;
+}
+
+Object.values(inputs).forEach(el => el.addEventListener('input', recompute));
+document.querySelectorAll('#modes button').forEach(btn => btn.addEventListener('click', () => {
+  document.querySelectorAll('#modes button').forEach(b => b.classList.toggle('active', b === btn));
+  currentMode = btn.dataset.mode;
+  applyMode(result);
+}));
+
+recompute();
+
+/* =====================================================================
+ * 4) ANIMATION LOOP
+ * ===================================================================== */
+const clock = new THREE.Clock();
+const valveStemBase = valveMoving.position.y;
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(0.05, clock.getDelta());
+
+  // Valve: handwheel turns 3 full revolutions from closed to open, stem rises 0.12 m
+  valveShownOpening += (valveTargetOpening - valveShownOpening) * Math.min(1, dt * 6);
+  valveMoving.rotation.y = -valveShownOpening * Math.PI * 6;
+  valveMoving.position.y = valveStemBase + valveShownOpening * 0.12;
+
+  // Gauge needles (damped)
+  for (const pivot of Object.values(gaugeNeedles)) {
+    const cur = pivot.userData.cur ?? 0, tgt = pivot.userData.target ?? 0;
+    const next = cur + (tgt - cur) * Math.min(1, dt * 5);
+    pivot.userData.cur = next;
+    pivot.rotation.z = -(-135 + next * 270) * Math.PI / 180;
+  }
+
+  updateTracers(dt, result);
+  controls.update();
+  renderer.render(scene, camera);
+  labelRenderer.render(scene, camera);
+}
+animate();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight); labelRenderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
